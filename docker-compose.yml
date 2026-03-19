@@ -1,0 +1,71 @@
+# Airflow com LocalExecutor (Postgres + Scheduler + Webserver)
+# Na raiz do projeto: docker compose up -d
+
+x-common-env: &common-env
+  AIRFLOW__CORE__EXECUTOR: LocalExecutor
+  AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+  AIRFLOW__CORE__FERNET_KEY: ""
+  AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+  AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "false"
+  PYTHONPATH: /opt/airflow
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  airflow-init:
+    build: .
+    entrypoint: /bin/bash -c "airflow db init && airflow users create -u admin -f Admin -l User -r Admin -e admin@localhost -p admin || true"
+    environment:
+      <<: *common-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  airflow-webserver:
+    build: .
+    command: airflow webserver
+    ports:
+      - "8080:8080"
+    environment:
+      <<: *common-env
+    volumes:
+      - .:/opt/airflow
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  airflow-scheduler:
+    build: .
+    command: airflow scheduler
+    environment:
+      <<: *common-env
+    volumes:
+      - .:/opt/airflow
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
