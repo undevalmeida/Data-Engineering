@@ -299,3 +299,6 @@ dev/registry/modules.json
 dev/registry/providers.json
 teste.py
 tests/
+/data/bronze/
+/data/silver/
+/data/gold/
