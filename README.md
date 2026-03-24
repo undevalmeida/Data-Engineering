@@ -18,6 +18,8 @@ Outra API de referência (apenas links): [api-football.com](https://www.api-foot
 ```text
 .
 ├── common/                  
+│   ├── airflow_context.py
+│   ├── airflow_variables.py
 │   ├── config.py
 │   ├── constants.py
 │   └── logging.py
