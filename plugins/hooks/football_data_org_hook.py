@@ -9,6 +9,7 @@ Connection no Airflow:
 
 """
 import json
+import time
 from typing import Any
 
 import requests
@@ -79,13 +80,29 @@ class FootballDataOrgHook(BaseHook):
         headers: dict[str, str] | None = None,
         **kwargs: Any,
     ) -> Any:
-        """Executa requisição e retorna JSON."""
+        """Executa requisição e retorna JSON, com retry para 429/503."""
         self.get_conn()
         url = f"{self._base_url.rstrip('/')}/{endpoint.lstrip('/')}"
         req_headers = {**(headers or {})}
-        response = self._session.request(
-            method=method, url=url, params=params, headers=req_headers or None, **kwargs
-        )
+        max_attempts = 8
+        response = None
+        for attempt in range(max_attempts):
+            response = self._session.request(
+                method=method, url=url, params=params, headers=req_headers or None, **kwargs
+            )
+            if response.status_code == 429:
+                retry_after = response.headers.get("Retry-After")
+                try:
+                    wait_seconds = int(retry_after) if retry_after else min(6 * (attempt + 1), 120)
+                except ValueError:
+                    wait_seconds = min(6 * (attempt + 1), 120)
+                time.sleep(wait_seconds)
+                continue
+            if response.status_code == 503:
+                time.sleep(min(2 ** attempt, 60))
+                continue
+            response.raise_for_status()
+            return response.json()
         response.raise_for_status()
         return response.json()
 
@@ -118,6 +135,43 @@ class FootballDataOrgHook(BaseHook):
             f"competitions/{competition_id}/matches",
             params=params or None,
         )
+
+    def get_competition_matches_all_pages(self, competition_id: str, **params: Any) -> dict[str, Any]:
+        """
+        Lista partidas de uma competição agregando páginas via limit/offset.
+        """
+        merged: list[Any] = []
+        offset = 0
+        limit = 100
+        first: dict[str, Any] | None = None
+        total_expected: int | None = None
+        for _ in range(500):
+            page_params = dict(params) if params else {}
+            page_params["limit"] = limit
+            page_params["offset"] = offset
+            payload = self._run(
+                f"competitions/{competition_id}/matches",
+                params=page_params,
+            )
+            if first is None:
+                first = payload
+                count = (payload.get("resultSet") or {}).get("count")
+                try:
+                    total_expected = int(count) if count is not None else None
+                except (TypeError, ValueError):
+                    total_expected = None
+            chunk = payload.get("matches") or []
+            merged.extend(chunk)
+            if total_expected is not None and len(merged) >= total_expected:
+                break
+            if not chunk or len(chunk) < limit:
+                break
+            offset += limit
+        if first is None:
+            return {"matches": [], "filters": params or {}, "resultSet": {}}
+        out = dict(first)
+        out["matches"] = merged
+        return out
 
     def get_competition_teams(self, competition_id: str, season: str | None = None) -> Any:
         """Lista times de uma competição."""
