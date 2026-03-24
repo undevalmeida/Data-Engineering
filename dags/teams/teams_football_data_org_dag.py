@@ -9,6 +9,8 @@ from airflow.decorators import dag, task
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import get_current_context
 
+from common.airflow_context import context_ds_yyyy_mm_dd
+
 DAG_ID = "teams_football_data_org_dag"
 
 
@@ -28,21 +30,21 @@ def teams_football_data_org_dag():
     def bronze():
         context = get_current_context()
         from pipelines.teams.load_teams_bronze import run_bronze
-        run_bronze(execution_date=context["ds"])
+        run_bronze(execution_date=context_ds_yyyy_mm_dd(context))
         return "ok"
 
     @task
     def silver():
         context = get_current_context()
         from pipelines.teams.transform_teams_silver import run_silver
-        run_silver(execution_date=context["ds"])
+        run_silver(execution_date=context_ds_yyyy_mm_dd(context))
         return "ok"
 
     @task
     def gold():
         context = get_current_context()
         from pipelines.teams.aggregate_teams_gold import run_gold
-        run_gold(execution_date=context["ds"])
+        run_gold(execution_date=context_ds_yyyy_mm_dd(context))
         return "ok"
 
     init >> bronze() >> silver() >> gold() >> finish
